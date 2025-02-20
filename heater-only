@@ -4,7 +4,6 @@ import threading
 import time
 import csv
 import os
-import serial
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from tenmaDcLib import instantiate_tenma_class_from_device_response
@@ -54,14 +53,12 @@ class PIDController:
         Compute the PID output.
         :param setpoint: Desired temperature setpoint
         :param current_temp: Current temperature reading
-        :return: PID output (limited between 0 and 3)
+        :return: (output, p_term, i_term, d_term)
+                 where output is clamped to [0, 3] amps (scaled here to 3000 for the Tenma)
         """
-        # Simulate time delay using FIFO buffer
-        self.time_delay_buffer.append(current_temp)
-        current_temp_delayed = self.time_delay_buffer.pop(0)
-
+        
         # Error
-        error = setpoint - current_temp_delayed
+        error = setpoint - current_temp
 
         # Integral term with wind-up guard
         self.integral += error * self.delta_t
@@ -70,18 +67,20 @@ class PIDController:
         # Derivative
         derivative = (error - self.previous_error) / self.delta_t
 
-        # PID output
+        # PID calculations
         proportional = self.kc * error
         integral_term = (self.kc / self.ti) * self.integral
         derivative_term = self.kc * self.td * derivative
-        output = proportional + integral_term + derivative_term
+        output = 15 * (proportional + integral_term + derivative_term)  # 10x factor for demonstration
 
         self.previous_error = error
         print(f"Error: {error:.2f}, P: {proportional:.2f}, I: {integral_term:.2f}, "
               f"D: {derivative_term:.2f}, Output: {output:.2f}")
 
-        # Clamp output in [0, 3] amps
-        return max(0, min(output, 3))
+        # Clamp output in [0, 3000] (0 to 3A but scaled by 1000)
+        output_clamped = max(0, min(output, 3000))
+
+        return output_clamped, proportional, integral_term, derivative_term
 
 
 # ---------------------------------------------------
@@ -91,7 +90,7 @@ class HeaterControlApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Temperature Control System")
-        self.root.geometry("1000x800")
+        self.root.geometry("1000x800+600+600")
         self.running = False
         self.is_logged_in = False
 
@@ -104,12 +103,12 @@ class HeaterControlApp:
             print(f"Error initializing MAX31865 sensor: {e}")
             self.sensor = None
 
-        # Initialize the single power supply (Tenma 2540)
-        self.power_supply = self.initialize_power_supply()
+        # We'll instantiate self.power_supply once the user clicks "Connect Device"
+        self.power_supply = None
 
         # PID controller
         self.pid = PIDController(kc=1.5, ti=3.0, td=0.5)
-
+        
         # Variables
         self.current_temp = tk.DoubleVar(value=0.0)
         self.set_temp = tk.DoubleVar(value=30.0)
@@ -119,7 +118,7 @@ class HeaterControlApp:
         self.temp_profiles = []
         self.initial_temp = tk.DoubleVar(value=25.0)
         self.is_processing = tk.BooleanVar(value=False)
-        self.heat_sink_temp = tk.DoubleVar(value=0.0)
+        self.heat_sink_temp = tk.DoubleVar(value=0.0)  # if you have a second sensor
 
         # Setup login GUI
         self.setup_login_gui()
@@ -132,20 +131,6 @@ class HeaterControlApp:
         self.time_stamps = []
         self.temperatures = []
         self.start_time = time.time()
-
-    # ------------------------------------------------
-    # Power Supply Initialization
-    # ------------------------------------------------
-    def initialize_power_supply(self):
-        """
-        Try to connect to the Tenma 2540 power supply. Modify serial port as needed.
-        """
-        try:
-            port = '/dev/ttyACM0'
-            return instantiate_tenma_class_from_device_response(port)
-        except Exception as e:
-            print(f"Error connecting to power supply: {e}")
-            return None
 
     # ------------------------------------------------
     # Login GUI
@@ -266,11 +251,22 @@ class HeaterControlApp:
         self.canvas_plot = FigureCanvasTkAgg(self.fig, master=plot_frame)
         self.canvas_plot.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
+    # ------------------------------------------------
+    # Connect Power Supply Device
+    # ------------------------------------------------
     def connect_device(self):
+        """
+        Attempt to connect to the Tenma power supply on a specific port.
+        If successful, assign the instantiated Tenma object to self.power_supply
+        and set self.connection_status to True.
+        """
         try:
+            port = '/dev/ttyACM0'  # Change if your device is on a different port
+            self.power_supply = instantiate_tenma_class_from_device_response(port)
             self.connection_status.set(True)
-            self.error_message.set("")
+            self.error_message.set("Connected to the Tenma power supply successfully.")
         except Exception as e:
+            self.connection_status.set(False)
             self.error_message.set(f"Failed to connect to the device: {e}")
 
     def add_reading(self):
@@ -331,20 +327,20 @@ class HeaterControlApp:
         self.is_processing.set(False)
 
     # ------------------------------------------------
-    # Control Logic
+    # Control Logic (Removed incremental stepping)
     # ------------------------------------------------
     def control_loop(self):
         """
         For each profile:
-          1. Start from T1 and step up/down to T2 in 20°C increments.
-          2. Once T2 is reached, dwell for 'Stay Time'.
+          1. Directly set T2 (from T1).
+          2. Once T2 is reached (within a tolerance), dwell for 'Stay Time'.
         """
         if self.power_supply:
             # Reset the Tenma power supply to 0 A at the start of the process
-            self.power_supply.output_off()
-            self.power_supply.set_voltage(30.0)    # Adjust as needed
-            self.power_supply.set_current(0.0)
-            self.power_supply.output_on()
+            self.power_supply.OFF()
+            self.power_supply.setVoltage(1, 30000)  # Adjust voltage as needed
+            self.power_supply.setCurrent(1, 2500)
+            self.power_supply.ON()
 
         for profile in self.temp_profiles:
             if not self.is_processing.get():
@@ -354,63 +350,74 @@ class HeaterControlApp:
             T2 = profile["T2"]
             stay_time = profile["Stay Time"]
 
-            # Generate increments of 20 degrees from T1 to T2
-            increments = self.get_temp_increments(T1, T2, step=20)
+            # Set temperature directly to T2
+            self.set_temp.set(T2)
 
-            # Step through each increment
-            for inc_target in increments:
-                if not self.is_processing.get():
+            # Ramp until we get close to T2 (within +/- 0.5°C)
+            while self.is_processing.get():
+                temp = self.sensor.temperature if self.sensor else T1
+                self.current_temp.set(temp)
+
+                # PID output
+                output_current, p_term, i_term, d_term = self.pid.compute(self.set_temp.get(), temp)
+
+                # Update Tenma supply current
+                if self.power_supply:
+                    try:
+                        self.power_supply.setCurrent(1, int(output_current))
+                    except Exception as e:
+                        print(f"Warning: Could not set power supply current: {e}")
+
+                # Log for plotting & CSV
+                elapsed_time = time.time() - self.start_time
+                self.time_stamps.append(elapsed_time)
+                self.temperatures.append(temp)
+                self.log_data(
+                    elapsed_time,
+                    self.set_temp.get(),
+                    temp,
+                    p_term,
+                    i_term,
+                    d_term,
+                    output_current
+                )
+                self.update_plot()
+
+                # Check if we've reached T2 within 0.5°C
+                if (T2 >= T1 and temp >= T2 - 0.5) or (T2 < T1 and temp <= T2 + 0.5):
                     break
 
-                self.set_temp.set(inc_target)
-                # Heat/cool until we reach inc_target (within some tolerance)
-                while self.is_processing.get():
-                    temp = self.sensor.temperature if self.sensor else T1  # fallback to T1 if no sensor
-                    self.current_temp.set(temp)
+                time.sleep(1)
 
-                    # PID output
-                    output_current = self.pid.compute(self.set_temp.get(), temp)
-                    self.current_output.set(output_current)
-
-                    # Update Tenma supply current
-                    if self.power_supply:
-                        try:
-                            self.power_supply.set_current(output_current)
-                        except Exception as e:
-                            print(f"Warning: Could not set power supply current: {e}")
-
-                    # Logging for plotting
-                    self.time_stamps.append(time.time() - self.start_time)
-                    self.temperatures.append(temp)
-                    self.update_plot()
-
-                    # Check if we've reached or surpassed the increment target
-                    if (T2 >= T1 and temp >= inc_target - 0.5) or \
-                       (T2 < T1  and temp <= inc_target + 0.5):
-                        break
-
-                    time.sleep(1)
-
-            # Once final increment (T2) is reached, stay for the specified time
+            # Once T2 is reached, stay for the specified time
             stay_start = time.time()
             while self.is_processing.get() and (time.time() - stay_start < stay_time * 60):
                 temp = self.sensor.temperature if self.sensor else T2
                 self.current_temp.set(temp)
 
-                # PID output (holding T2)
-                output_current = self.pid.compute(T2, temp)
-                self.current_output.set(output_current)
+                # PID hold at T2
+                output_current, p_term, i_term, d_term = self.pid.compute(T2, temp)
 
                 # Update power supply
                 if self.power_supply:
                     try:
-                        self.power_supply.set_current(output_current)
+                        self.power_supply.setCurrent(1, int(output_current))
                     except Exception as e:
                         print(f"Warning: Could not set power supply current: {e}")
 
-                # Logging for plotting
-                self.time_stamps.append(time.time() - self.start_time)
+                # Log for plotting & CSV
+                elapsed_time = time.time() - self.start_time
+                self.time_stamps.append(elapsed_time)
                 self.temperatures.append(temp)
+                self.log_data(
+                    elapsed_time,
+                    T2,
+                    temp,
+                    p_term,
+                    i_term,
+                    d_term,
+                    output_current
+                )
                 self.update_plot()
                 time.sleep(1)
 
@@ -419,37 +426,38 @@ class HeaterControlApp:
 
         # After all profiles or if stopped, turn off the supply
         if self.power_supply:
-            self.power_supply.set_current(0.0)
-            self.power_supply.output_off()
+            self.power_supply.setCurrent(1, 0)
+            self.power_supply.OFF()
 
     # ------------------------------------------------
-    # Utility: Generate 20°C increments
+    # CSV Logging
     # ------------------------------------------------
-    def get_temp_increments(self, T1, T2, step=20):
+    def setup_logging(self):
         """
-        Return a list of intermediate setpoints in 20°C increments
-        from T1 to T2 (inclusive).
-        Example: T1=25, T2=85 => [45, 65, 85]
+        Sets up a CSV logging file with headers if it doesn't exist.
+        We add columns for Time, Set Temperature, Current Temperature,
+        Proportional, Integral, Derivative, and Output Current.
         """
-        increments = []
-        if T2 > T1:
-            current = T1
-            while current < T2:
-                next_temp = current + step
-                if next_temp > T2:
-                    next_temp = T2
-                increments.append(next_temp)
-                current = next_temp
-        else:
-            # Handle the case if T2 < T1 (cooling in steps of -20°C)
-            current = T1
-            while current > T2:
-                next_temp = current - step
-                if next_temp < T2:
-                    next_temp = T2
-                increments.append(next_temp)
-                current = next_temp
-        return increments
+        if not os.path.exists(self.data_log_file):
+            with open(self.data_log_file, "w", newline="") as file:
+                writer = csv.writer(file)
+                writer.writerow([
+                    "Time (s)",
+                    "Set Temperature (°C)",
+                    "Current Temperature (°C)",
+                    "Proportional",
+                    "Integral",
+                    "Derivative",
+                    "Output Current (A)"
+                ])
+
+    def log_data(self, time_s, set_temp, current_temp, p, i, d, output_current):
+        """
+        Append a single row of data to the CSV log.
+        """
+        with open(self.data_log_file, "a", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow([time_s, set_temp, current_temp, p, i, d, output_current])
 
     # ------------------------------------------------
     # Plotting
@@ -461,19 +469,6 @@ class HeaterControlApp:
         self.ax.set_ylabel("Temperature (°C)")
         self.ax.legend()
         self.canvas_plot.draw()
-
-    # ------------------------------------------------
-    # CSV Logging
-    # ------------------------------------------------
-    def setup_logging(self):
-        """
-        Sets up a CSV logging file with headers if it doesn't exist.
-        """
-        if not os.path.exists(self.data_log_file):
-            with open(self.data_log_file, "w", newline="") as file:
-                writer = csv.writer(file)
-                writer.writerow(["Time (s)", "Set Temperature (°C)",
-                                 "Current Temperature (°C)", "Output Current (A)"])
 
 
 if __name__ == "__main__":
