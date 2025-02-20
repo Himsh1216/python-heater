@@ -24,13 +24,13 @@ import digitalio
 # PID Controller
 # ---------------------------------------------------
 class PIDController:
-    def __init__(self, kc=1.5, ti=3.0, td=0.5, delta_t=0.01, theta=0.2, integral_limit=100):
+    def __init__(self, kc=1.5, ti=3.0, td=0.5, delta_t=1.0, theta=0.2, integral_limit=100):
         """
         A simple PID controller with a time-delay buffer.
         :param kc: Controller gain
         :param ti: Integral time
         :param td: Derivative time
-        :param delta_t: Sampling time
+        :param delta_t: Sampling time (in seconds)
         :param theta: Time delay for simulating lag
         :param integral_limit: Limit for integral wind-up
         """
@@ -54,9 +54,9 @@ class PIDController:
         :param setpoint: Desired temperature setpoint
         :param current_temp: Current temperature reading
         :return: (output, p_term, i_term, d_term)
-                 where output is clamped to [0, 3] amps (scaled here to 3000 for the Tenma)
+                 where output is clamped to [0, 3] amps (scaled to [0,3000])
         """
-        
+
         # Error
         error = setpoint - current_temp
 
@@ -71,7 +71,7 @@ class PIDController:
         proportional = self.kc * error
         integral_term = (self.kc / self.ti) * self.integral
         derivative_term = self.kc * self.td * derivative
-        output = 15 * (proportional + integral_term + derivative_term)  # 10x factor for demonstration
+        output = 15 * (proportional + integral_term + derivative_term)  # 10–15× factor for demonstration
 
         self.previous_error = error
         print(f"Error: {error:.2f}, P: {proportional:.2f}, I: {integral_term:.2f}, "
@@ -106,9 +106,9 @@ class HeaterControlApp:
         # We'll instantiate self.power_supply once the user clicks "Connect Device"
         self.power_supply = None
 
-        # PID controller
-        self.pid = PIDController(kc=1.5, ti=3.0, td=0.5)
-        
+        # PID controller (delta_t = 1.0 since we sleep 1 second in control_loop)
+        self.pid = PIDController(kc=1.5, ti=3.0, td=0.5, delta_t=1.0)
+
         # Variables
         self.current_temp = tk.DoubleVar(value=0.0)
         self.set_temp = tk.DoubleVar(value=30.0)
@@ -327,7 +327,7 @@ class HeaterControlApp:
         self.is_processing.set(False)
 
     # ------------------------------------------------
-    # Control Logic (Removed incremental stepping)
+    # Control Logic
     # ------------------------------------------------
     def control_loop(self):
         """
@@ -338,7 +338,7 @@ class HeaterControlApp:
         if self.power_supply:
             # Reset the Tenma power supply to 0 A at the start of the process
             self.power_supply.OFF()
-            self.power_supply.setVoltage(1, 30000)  # Adjust voltage as needed
+            self.power_supply.setVoltage(1, 30000)  # 30 V (adjust as needed)
             self.power_supply.setCurrent(1, 2500)
             self.power_supply.ON()
 
