@@ -96,8 +96,7 @@ class HeaterControlApp:
         # Initialize power supplies
         self.power_supply1, self.power_supply2 = self.initialize_power_supplies()
 
-        # Initialize PID (tuned parameters can be replaced as desired)
-        # Keeping original naming for consistency, but the class uses kc, ti, td
+        # Initialize PID
         self.pid = PIDController(kc=1.5, ti=3.0, td=0.5)
 
         # Variables
@@ -110,8 +109,6 @@ class HeaterControlApp:
         self.initial_temp = tk.DoubleVar(value=25.0)
         self.is_processing = tk.BooleanVar(value=False)
         self.heat_sink_temp = tk.DoubleVar(value=0.0)
-        self.filtered_temp = 0.0
-        self.alpha = 0.2
 
         # Setup login GUI
         self.setup_login_gui()
@@ -351,20 +348,17 @@ class HeaterControlApp:
                 if not self.is_processing.get():
                     break
 
-                # Read temperature from sensor
+                # Read temperature directly from sensor (no filtering)
                 temp = self.sensor.temperature if self.sensor else 0
-
-                # Simple low-pass filter for smoothing
-                self.filtered_temp = self.alpha * temp + (1 - self.alpha) * self.filtered_temp
-                self.current_temp.set(self.filtered_temp)
+                self.current_temp.set(temp)
 
                 # Compute PID output
-                output_current = self.pid.compute(self.set_temp.get(), self.filtered_temp)
+                output_current = self.pid.compute(self.set_temp.get(), temp)
                 self.current_output.set(output_current)
 
                 # Log data in memory (for plotting)
                 self.time_stamps.append(time.time() - self.start_time)
-                self.temperatures.append(self.filtered_temp)
+                self.temperatures.append(temp)
 
                 # Update the plot
                 self.update_plot()
@@ -389,7 +383,6 @@ class HeaterControlApp:
         if not os.path.exists(self.data_log_file):
             with open(self.data_log_file, "w", newline="") as file:
                 writer = csv.writer(file)
-                # Removed "Light Intensity (%)" from headers
                 writer.writerow(["Time (s)", "Set Temperature (°C)", "Current Temperature (°C)", "Output Current (A)"])
 
 
