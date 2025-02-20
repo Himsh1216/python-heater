@@ -7,7 +7,7 @@ import os
 import serial
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from tenmaDcLib import Tenma72_2540  # <-- Updated import
+from tenmaDcLib import instantiate_tenma_class_from_device_response
 
 try:
     import adafruit_max31865 as max31865
@@ -141,8 +141,8 @@ class HeaterControlApp:
         Try to connect to the Tenma 2540 power supply. Modify serial port as needed.
         """
         try:
-            serial_port = serial.Serial('/dev/ttyACM0', baudrate=9600, timeout=1)
-            return Tenma2540(serial_port)
+            port = '/dev/ttyACM0'
+            return instantiate_tenma_class_from_device_response(port)
         except Exception as e:
             print(f"Error connecting to power supply: {e}")
             return None
