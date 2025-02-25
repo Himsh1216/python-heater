@@ -167,89 +167,76 @@ class HeaterControlApp:
     # Main GUI
     # ------------------------------------------------
     def setup_gui(self):
-        self.canvas = tk.Canvas(self.root)
-        self.scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=self.canvas.yview)
-        self.scrollable_frame = ttk.Frame(self.canvas)
+    # Main container directly in root (no scrolling unless content overflows)
+    main_container = ttk.Frame(self.root)
+    main_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        self.scrollable_frame.bind(
-            "<Configure>",
-            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-        )
-        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
-        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+    title_label = ttk.Label(main_container, text="Temperature Control System", font=("Arial", 16, "bold"))
+    title_label.pack(pady=10)
 
-        self.canvas.pack(side="left", fill="both", expand=True)
-        self.scrollbar.pack(side="right", fill="y")
+    error_label = ttk.Label(main_container, textvariable=self.error_message, foreground="red")
+    error_label.pack()
 
-        main_container = ttk.Frame(self.scrollable_frame)
-        main_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+    # Current readings
+    current_readings_frame = ttk.LabelFrame(main_container, text="Current Readings")
+    current_readings_frame.pack(fill=tk.X, pady=10)
 
-        title_label = ttk.Label(main_container, text="Temperature Control System", font=("Arial", 16, "bold"))
-        title_label.pack(pady=10)
+    ttk.Label(current_readings_frame, text="Current Temperature:").pack()
+    ttk.Label(current_readings_frame, textvariable=self.current_temp, font=("Arial", 14)).pack()
 
-        error_label = ttk.Label(main_container, textvariable=self.error_message, foreground="red")
-        error_label.pack()
+    ttk.Label(current_readings_frame, text="Heat Sink Temperature:").pack()
+    ttk.Label(current_readings_frame, textvariable=self.heat_sink_temp, font=("Arial", 14)).pack()
 
-        # Current readings
-        current_readings_frame = ttk.LabelFrame(main_container, text="Current Readings")
-        current_readings_frame.pack(fill=tk.X, pady=10)
+    # Connection frame
+    connection_frame = ttk.Frame(main_container)
+    connection_frame.pack(fill=tk.X, pady=10)
 
-        ttk.Label(current_readings_frame, text="Current Temperature:").pack()
-        ttk.Label(current_readings_frame, textvariable=self.current_temp, font=("Arial", 14)).pack()
+    connect_button = ttk.Button(connection_frame, text="Connect Device", command=self.connect_device)
+    connect_button.pack(side=tk.LEFT, padx=5)
 
-        ttk.Label(current_readings_frame, text="Heat Sink Temperature:").pack()
-        ttk.Label(current_readings_frame, textvariable=self.heat_sink_temp, font=("Arial", 14)).pack()
+    connection_status_label = ttk.Label(connection_frame, textvariable=self.connection_status)
+    connection_status_label.pack(side=tk.LEFT, padx=5)
 
-        # Connection frame
-        connection_frame = ttk.Frame(main_container)
-        connection_frame.pack(fill=tk.X, pady=10)
+    # Profile frame
+    profile_frame = ttk.LabelFrame(main_container, text="Temperature Profile")
+    profile_frame.pack(fill=tk.BOTH, expand=True, pady=10)
 
-        connect_button = ttk.Button(connection_frame, text="Connect Device", command=self.connect_device)
-        connect_button.pack(side=tk.LEFT, padx=5)
+    self.profile_table = ttk.Treeview(profile_frame, columns=("T1", "T2", "Stay Time"), show="headings")
+    self.profile_table.heading("T1", text="T1 (°C)")
+    self.profile_table.heading("T2", text="T2 (°C)")
+    self.profile_table.heading("Stay Time", text="Stay Time (min)")
+    self.profile_table.pack(fill=tk.BOTH, expand=True)
 
-        connection_status_label = ttk.Label(connection_frame, textvariable=self.connection_status)
-        connection_status_label.pack(side=tk.LEFT, padx=5)
+    input_frame = ttk.Frame(profile_frame)
+    input_frame.pack(pady=10)
 
-        # Profile frame
-        profile_frame = ttk.LabelFrame(main_container, text="Temperature Profile")
-        profile_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+    ttk.Label(input_frame, text="T2 (°C):").grid(row=0, column=0, padx=5)
+    self.t2_entry = ttk.Entry(input_frame)
+    self.t2_entry.grid(row=0, column=1, padx=5)
 
-        self.profile_table = ttk.Treeview(profile_frame, columns=("T1", "T2", "Stay Time"), show="headings")
-        self.profile_table.heading("T1", text="T1 (°C)")
-        self.profile_table.heading("T2", text="T2 (°C)")
-        self.profile_table.heading("Stay Time", text="Stay Time (min)")
-        self.profile_table.pack(fill=tk.BOTH, expand=True)
+    ttk.Label(input_frame, text="Stay Time (min):").grid(row=0, column=2, padx=5)
+    self.stay_time_entry = ttk.Entry(input_frame)
+    self.stay_time_entry.grid(row=0, column=3, padx=5)
 
-        input_frame = ttk.Frame(profile_frame)
-        input_frame.pack(pady=10)
+    add_reading_button = ttk.Button(input_frame, text="Add Profile", command=self.add_reading)
+    add_reading_button.grid(row=0, column=4, padx=5)
 
-        ttk.Label(input_frame, text="T2 (°C):").grid(row=0, column=0, padx=5)
-        self.t2_entry = ttk.Entry(input_frame)
-        self.t2_entry.grid(row=0, column=1, padx=5)
+    button_frame = ttk.Frame(profile_frame)
+    button_frame.pack(pady=10)
 
-        ttk.Label(input_frame, text="Stay Time (min):").grid(row=0, column=2, padx=5)
-        self.stay_time_entry = ttk.Entry(input_frame)
-        self.stay_time_entry.grid(row=0, column=3, padx=5)
+    start_process_button = ttk.Button(button_frame, text="Start Process", command=self.start_process)
+    start_process_button.pack(side=tk.LEFT, padx=5)
 
-        add_reading_button = ttk.Button(input_frame, text="Add Profile", command=self.add_reading)
-        add_reading_button.grid(row=0, column=4, padx=5)
+    stop_process_button = ttk.Button(button_frame, text="Stop Process", command=self.stop_process)
+    stop_process_button.pack(side=tk.LEFT, padx=5)
 
-        button_frame = ttk.Frame(profile_frame)
-        button_frame.pack(pady=10)
+    # Plot frame
+    plot_frame = ttk.LabelFrame(main_container, text="Temperature vs Time")
+    plot_frame.pack(fill=tk.BOTH, expand=True, pady=10)
 
-        start_process_button = ttk.Button(button_frame, text="Start Process", command=self.start_process)
-        start_process_button.pack(side=tk.LEFT, padx=5)
-
-        stop_process_button = ttk.Button(button_frame, text="Stop Process", command=self.stop_process)
-        stop_process_button.pack(side=tk.LEFT, padx=5)
-
-        # Plot frame
-        plot_frame = ttk.LabelFrame(main_container, text="Temperature vs Time")
-        plot_frame.pack(fill=tk.BOTH, expand=True, pady=10)
-
-        self.fig, self.ax = plt.subplots()
-        self.canvas_plot = FigureCanvasTkAgg(self.fig, master=plot_frame)
-        self.canvas_plot.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+    self.fig, self.ax = plt.subplots()
+    self.canvas_plot = FigureCanvasTkAgg(self.fig, master=plot_frame)
+    self.canvas_plot.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
     # ------------------------------------------------
     # Connect Power Supply Device
