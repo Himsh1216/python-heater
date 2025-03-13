@@ -1,0 +1,5 @@
+# Note: tenmaDcLib is required but not available on PyPI.
+# Please ensure it is installed manually or included in the project directory.
+matplotlib>=3.5.0
+adafruit-circuitpython-max31865>=2.2.0
+adafruit-blinka>=8.0.0
